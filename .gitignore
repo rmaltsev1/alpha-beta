@@ -149,6 +149,8 @@ activemq-data/
 
 # Environments
 .env
+.env.*
+!.env.example
 .envrc
 .venv
 env/
@@ -156,6 +158,15 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Local market data (downloaded from prod, do not commit)
+data/
+!data/.gitkeep
+
+# Logs / scratch
+*.log
+scratch/
+.DS_Store
 
 # Spyder project settings
 .spyderproject
