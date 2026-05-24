@@ -78,3 +78,24 @@ local store fresh.
 If the SSH tunnel is closed, `--source api` falls back to the public
 upstreams (Binance for crypto, OANDA for forex/indices). OANDA needs
 `OANDA_API_KEY` set in `.env`.
+
+## Live streaming
+
+`python -m alphabeta stream` opens a Binance WebSocket for crypto and an
+OANDA REST stream for forex / indices, and appends each closed candle
+to the local parquet file as it arrives.
+
+- **Crypto.** Native multi-timeframe streams — Binance emits a fresh
+  closed bar for each timeframe you subscribe to.
+- **Forex / indices.** OANDA only streams ticks. We aggregate them into
+  M1 bars, then resample closed M1s up to M5 / M15 / H1 / H4 / D1 as the
+  boundaries hit. Same trick the rektfree backend uses.
+
+```sh
+python -m alphabeta stream                       # all 13 symbols, M1..D1
+python -m alphabeta stream --symbol BTCUSDT      # one crypto symbol only
+python -m alphabeta stream --no-oanda            # crypto only
+python -m alphabeta stream --no-binance          # fx + indices only
+```
+
+Both reconnect on drop. Ctrl-C to stop.

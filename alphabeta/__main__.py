@@ -6,18 +6,24 @@ Commands:
                              Default is incremental. Pass --full to re-download.
   status                     Show local vs. prod row counts side-by-side
                              (requires the SSH tunnel to be open).
+  stream                     Live-stream new bars into the parquet store
+                             (binance WS for crypto, oanda for fx/indices).
 
 Examples:
   python -m alphabeta fetch                        # incremental refresh, all symbols
   python -m alphabeta fetch --full                 # nuke and re-download everything
   python -m alphabeta fetch --symbol BTCUSDT       # just one symbol
-  python -m alphabeta fetch --timeframe 1H 4H D    # subset of timeframes
+  python -m alphabeta fetch --timeframe H1 H4 D1   # subset of timeframes
   python -m alphabeta fetch --source api           # bypass DB, hit Binance/OANDA directly
   python -m alphabeta list                         # what's on disk?
+  python -m alphabeta stream                       # live crypto + fx + indices, runs forever
+  python -m alphabeta stream --symbol BTCUSDT      # one crypto only
+  python -m alphabeta stream --no-oanda            # crypto only
 """
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import sys
 from datetime import datetime
@@ -67,6 +73,24 @@ def cmd_fetch(args: argparse.Namespace) -> int:
     return 0 if failed == 0 else 1
 
 
+def cmd_stream(args: argparse.Namespace) -> int:
+    from . import stream as stream_mod  # imports websockets lazily
+    syms = args.symbol or ALL_SYMBOLS
+    tfs = args.timeframe or ["M1", "M5", "M15", "H1", "H4", "D1"]
+    unknown = [s for s in syms if s not in ALL_SYMBOLS]
+    if unknown:
+        print(f"unknown symbol(s): {unknown}\nvalid: {ALL_SYMBOLS}", file=sys.stderr)
+        return 2
+    try:
+        asyncio.run(stream_mod.run(
+            symbols=syms, timeframes=tfs,
+            binance=not args.no_binance, oanda=not args.no_oanda,
+        ))
+    except KeyboardInterrupt:
+        print("\nstream stopped (Ctrl-C)")
+    return 0
+
+
 def cmd_status(_args: argparse.Namespace) -> int:
     """Compare local row counts to prod row counts (needs the tunnel)."""
     local = storage.list_local().set_index(["symbol", "timeframe"])
@@ -104,6 +128,12 @@ def main(argv: list[str] | None = None) -> int:
     pf.add_argument("--symbol", nargs="+", help=f"subset of {ALL_SYMBOLS}")
     pf.add_argument("--timeframe", nargs="+", help=f"subset of {TIMEFRAMES}")
 
+    ps = sub.add_parser("stream", help="live stream new bars into the local store")
+    ps.add_argument("--symbol", nargs="+", help=f"subset of {ALL_SYMBOLS}")
+    ps.add_argument("--timeframe", nargs="+", help="binance TFs to subscribe to (default: M1..D1)")
+    ps.add_argument("--no-binance", action="store_true", help="skip crypto WebSocket")
+    ps.add_argument("--no-oanda", action="store_true", help="skip OANDA REST stream")
+
     args = p.parse_args(argv)
     _setup_logging(args.verbose)
 
@@ -113,6 +143,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_fetch(args)
     if args.cmd == "status":
         return cmd_status(args)
+    if args.cmd == "stream":
+        return cmd_stream(args)
     return 2
 
 
