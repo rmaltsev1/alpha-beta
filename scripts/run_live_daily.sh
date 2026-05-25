@@ -36,7 +36,21 @@ echo "[$TS] alphabeta live fire starting"
 echo "Repo: $REPO_ROOT"
 echo "Python: $(which python)"
 
-# Forward all args to the runner
+# Step 1: incremental fetch of fresh candles from Binance + OANDA APIs.
+# Uses --source api so no SSH tunnel is required. Incremental (only new bars
+# since last fetch), so typically ~30s-2min depending on how stale we are.
+# If fetch fails (network), continue anyway with whatever's on disk.
+echo "[$(date -u +%H:%M:%S)] fetching latest candles via API..."
+if ! python -m alphabeta fetch --source api; then
+    echo "[$(date -u +%H:%M:%S)] WARNING: fetch failed, proceeding with stale data" >&2
+fi
+
+# Step 2: run the live signal pipeline. The --once command refreshes the
+# master_v16 integration script (which reads pre-computed sleeve returns).
+# NOTE: individual sleeve scripts are NOT re-run by --once. The sleeve panel
+# `all_sleeve_returns_v15.parquet` is frozen until you manually rebuild it.
+# For day-over-day signal freshness, run rebuild_sleeves.sh weekly.
+echo "[$(date -u +%H:%M:%S)] running live --once..."
 python -m alphabeta live --once "$@"
 EXIT_CODE=$?
 
