@@ -1,0 +1,7 @@
+name,leg_a,leg_b,scale,is_sharpe,oos_sharpe,full_sharpe,y2022_sharpe,is_vol,oos_vol,full_dd,n_trades,adf_t_is_lastwin
+XAU_vs_DXY,XAU_USD,DXY_proxy,1.682,0.132,-1.008,-0.567,0.0,0.05,0.2409,-0.5734,5,-0.853
+US_vs_EU_equity,US_equity,EU_equity,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1,-5.592
+CRYPTO_vs_SPX,CRYPTO_mcap,SPX500_USD,0.143,0.574,0.168,0.44,0.754,0.05,0.0303,-0.0571,10,-6.002
+CRYPTO_vs_SPX_corrgate,CRYPTO_mcap,SPX500_USD,0.178,0.233,0.127,0.196,0.431,0.05,0.0276,-0.0478,4,-6.002
+JP225_vs_USDJPY,JP225_USD,USD_JPY,0.789,-0.073,-0.689,-0.355,0.04,0.05,0.0743,-0.2499,9,2.267
+DEFEND_vs_USeq,DEFEND,US_equity,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0,-11.679

@@ -163,10 +163,14 @@ venv.bak/
 data/
 !data/.gitkeep
 
-# Logs / scratch
+# Logs
 *.log
-scratch/
 .DS_Store
+
+# Scratch — keep code/reports, exclude large result binaries
+scratch/**/*.parquet
+scratch/**/_fetch.log
+scratch/**/__pycache__/
 
 # Spyder project settings
 .spyderproject
