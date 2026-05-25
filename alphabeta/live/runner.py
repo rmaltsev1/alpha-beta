@@ -19,13 +19,20 @@ import traceback
 from pathlib import Path
 from typing import Optional
 
+import pandas as pd
+
 from alphabeta.config import settings
+from alphabeta.live.attribution import compute_attribution, format_attribution_lines
 from alphabeta.live.exposure import (
     WINDOW_DAYS,
     compute_exposure,
     detect_signal_events,
     format_exposure_html,
     format_signal_events_html,
+)
+from alphabeta.live.paper_trades import (
+    process_exposure_shift,
+    format_trades_block_html,
 )
 from alphabeta.live.pnl import (
     latest_mtm,
@@ -34,12 +41,18 @@ from alphabeta.live.pnl import (
     STARTING_EQUITY,
     PRODUCTION_PARQUET,
 )
+from alphabeta.live.rebalance import build_rebalance_plan, format_rebalance_html
 from alphabeta.live.signals import (
     format_boot_message_html,
     format_daily_digest_html,
 )
 from alphabeta.live.state import State
 from alphabeta.live.telegram_client import TelegramClient
+
+PAPER_TRADES_DB = Path(__file__).resolve().parents[2].parent / "alpha-beta" / "data" / "live" / "paper_trades.sqlite"
+# Resolve via settings instead
+from alphabeta.config import settings
+PAPER_TRADES_DB = settings.data_dir / "live" / "paper_trades.sqlite"
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -142,9 +155,57 @@ def fire_once(*, dry_run: bool = False, refresh: bool = True, verbose: bool = Tr
             if verbose:
                 print("[runner] exposure preview:")
                 print(exposure_html)
-        # 3) material exposure-change events (signal feed)
+        # 3) material exposure-change events + sleeve attribution + paper-trade lifecycle
+        trade_events = []
         if signal_events:
-            events_html = format_signal_events_html(exposure_snap, signal_events)
+            # Build enhanced events message with attribution + trade-event tags
+            bar_ts = pd.Timestamp(exposure_snap.bar_iso)
+            event_lines = [
+                f"<b>🚦 Material exposure shifts — {exposure_snap.bar_iso[:10]}</b>",
+                f"<i>|Δbeta| ≥ 0.05 (R² {exposure_snap.r_squared:.2f})</i>",
+                "",
+            ]
+            for sym, b, d in signal_events:
+                prev = b - d
+                # Discrete trade lifecycle
+                trade_evt = process_exposure_shift(
+                    PAPER_TRADES_DB,
+                    instrument=sym,
+                    prev_beta=prev,
+                    new_beta=b,
+                    bar_iso=exposure_snap.bar_iso,
+                )
+                trade_events.append(trade_evt)
+                # Tag inside the message
+                if trade_evt.kind == "OPEN":
+                    action = f"OPEN {trade_evt.side}"
+                elif trade_evt.kind == "CLOSE":
+                    rp = (trade_evt.return_pct or 0) * 100
+                    action = f"CLOSE  ({rp:+.2f}%, held {trade_evt.hold_days}d)"
+                elif trade_evt.kind == "FLIP":
+                    rp = (trade_evt.return_pct or 0) * 100
+                    action = f"FLIP→{trade_evt.side}  (prior leg {rp:+.2f}%, held {trade_evt.hold_days}d)"
+                else:
+                    action = "resize"
+                event_lines.append(
+                    f"<code>{sym:<10}</code>  "
+                    f"β {prev:+.2f} → {b:+.2f}   [<b>{action}</b>]"
+                )
+                # Attribution: top sleeves driving this instrument
+                try:
+                    contribs = compute_attribution(sym, bar_ts=bar_ts, n_top=3)
+                    for line in format_attribution_lines(sym, contribs, indent="    "):
+                        event_lines.append(line)
+                except Exception as e:
+                    if verbose:
+                        print(f"[runner] attribution failed for {sym}: {e}", file=sys.stderr)
+                event_lines.append("")  # blank line between instruments
+
+            event_lines.append(
+                "<i>Estimates from rolling regression — not exact positions. "
+                "Open/Close use trade thresholds |β|≥0.05 / &lt;0.02.</i>"
+            )
+            events_html = "\n".join(event_lines)
             tc.send(
                 events_html,
                 parse_mode="HTML",
@@ -152,6 +213,35 @@ def fire_once(*, dry_run: bool = False, refresh: bool = True, verbose: bool = Tr
             )
             if verbose:
                 print(f"[runner] {len(signal_events)} signal event(s) emitted")
+
+        # 4) mirror-mode rebalance plan — sized to STARTING_EQUITY (fixed NAV),
+        # NOT the compounded backfilled equity, so the rebalance dollar amounts
+        # are stable and meaningful for a real paper-trader sizing to $100K.
+        if exposure_snap is not None:
+            plan = build_rebalance_plan(
+                exposure_snap.betas,
+                nav_usd=STARTING_EQUITY,
+                leverage=1.0,
+            )
+            rebalance_html = format_rebalance_html(
+                plan,
+                nav_usd=STARTING_EQUITY,
+                bar_iso=exposure_snap.bar_iso,
+            )
+            tc.send(
+                rebalance_html,
+                parse_mode="HTML",
+                idempotency_key=f"rebalance:{exposure_snap.bar_iso}",
+            )
+
+        # 5) paper-trades summary block
+        if exposure_snap is not None:
+            trades_html = format_trades_block_html(PAPER_TRADES_DB, exposure_snap.bar_iso)
+            tc.send(
+                trades_html,
+                parse_mode="HTML",
+                idempotency_key=f"trades:{exposure_snap.bar_iso}",
+            )
     except Exception as e:
         state.record_fire("D1", update.bar_close_iso, status="error", error_msg=str(e))
         return {
