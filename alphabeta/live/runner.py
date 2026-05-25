@@ -308,10 +308,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--once", action="store_true", help="Fire one D1 bar-close cycle and exit.")
     ap.add_argument("--ping", action="store_true", help="Send a connectivity-test Telegram message.")
     ap.add_argument("--status", action="store_true", help="Print current paper state as JSON.")
+    ap.add_argument("--report", action="store_true", help="Print full paper-trading dashboard (portfolio + trades + stats).")
     ap.add_argument("--dry-run", action="store_true", help="Print would-be actions; do not send Telegram or mutate state.")
     ap.add_argument("--no-refresh", action="store_true", help="Skip the master_v16 refresh step (use existing parquet).")
     ap.add_argument("--quiet", action="store_true", help="Minimal stdout output.")
     args = ap.parse_args(argv)
+
+    if args.report:
+        from alphabeta.live import report as report_mod
+        return report_mod.main()
 
     if args.status:
         print(json.dumps(status(), indent=2, default=str))

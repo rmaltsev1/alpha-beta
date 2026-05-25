@@ -151,6 +151,7 @@ def main(argv: list[str] | None = None) -> int:
     pl.add_argument("--once", action="store_true", help="fire one D1 bar-close cycle and exit")
     pl.add_argument("--ping", action="store_true", help="send connectivity-test telegram message")
     pl.add_argument("--status", action="store_true", help="print current paper state as JSON")
+    pl.add_argument("--report", action="store_true", help="print full paper-trading dashboard")
     pl.add_argument("--dry-run", action="store_true", help="no Telegram send, no state mutation")
     pl.add_argument("--no-refresh", action="store_true", help="skip the master_v16 refresh step")
     pl.add_argument("--quiet", action="store_true", help="minimal stdout output")
@@ -173,6 +174,7 @@ def main(argv: list[str] | None = None) -> int:
             ("--once", "once"),
             ("--ping", "ping"),
             ("--status", "status"),
+            ("--report", "report"),
             ("--dry-run", "dry_run"),
             ("--no-refresh", "no_refresh"),
             ("--quiet", "quiet"),
