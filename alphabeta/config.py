@@ -34,6 +34,10 @@ class Settings:
     # local storage root (resolved relative to repo if not absolute)
     data_dir: Path = (REPO_ROOT / os.getenv("DATA_DIR", "data")).resolve()
 
+    # telegram signal delivery (paper trading)
+    telegram_bot: str = os.getenv("TELEGRAM_BOT", "")
+    chat_id: str = os.getenv("CHAT_ID", "")
+
 
 settings = Settings()
 settings.data_dir.mkdir(parents=True, exist_ok=True)

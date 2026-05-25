@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+launchd plist template for the alpha-beta live signal pipeline.
+
+To install:
+  1. Edit ABS_REPO_PATH below to the absolute path of your alpha-beta repo.
+  2. Copy this file to ~/Library/LaunchAgents/com.alphabeta.live.plist (drop the .template suffix).
+  3. Load it:    launchctl load ~/Library/LaunchAgents/com.alphabeta.live.plist
+  4. Inspect:    launchctl list | grep alphabeta
+  5. Force-fire: launchctl start com.alphabeta.live
+  6. Unload:     launchctl unload ~/Library/LaunchAgents/com.alphabeta.live.plist
+
+This fires daily at 21:05 UTC (the D1 bar-close + a few minutes for data settle).
+KeepAlive is false because this is a daily one-shot, not a daemon.
+RunAtLoad fires once on machine boot/login — useful for catch-up.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.alphabeta.live</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>ABS_REPO_PATH/scripts/run_live_daily.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>21</integer>
+        <key>Minute</key>
+        <integer>5</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>ABS_HOME/Library/Logs/alphabeta_live.out</string>
+
+    <key>StandardErrorPath</key>
+    <string>ABS_HOME/Library/Logs/alphabeta_live.err</string>
+
+    <key>WorkingDirectory</key>
+    <string>ABS_REPO_PATH</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>LANG</key>
+        <string>en_US.UTF-8</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>

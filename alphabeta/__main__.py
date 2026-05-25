@@ -91,6 +91,19 @@ def cmd_stream(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_live(args: argparse.Namespace) -> int:
+    """Run the live Telegram signal pipeline (one-shot or test).
+
+    Subcommands (via --once / --ping / --status / --dry-run):
+      --once     Fire one D1 bar-close cycle (cron entrypoint).
+      --ping     Send a connectivity-test Telegram message.
+      --status   Print current paper state as JSON.
+      --dry-run  Same as --once but no Telegram send, no state mutation.
+    """
+    from .live import runner
+    return runner.main(getattr(args, "_remaining", []))
+
+
 def cmd_status(_args: argparse.Namespace) -> int:
     """Compare local row counts to prod row counts (needs the tunnel)."""
     local = storage.list_local().set_index(["symbol", "timeframe"])
@@ -134,6 +147,14 @@ def main(argv: list[str] | None = None) -> int:
     ps.add_argument("--no-binance", action="store_true", help="skip crypto WebSocket")
     ps.add_argument("--no-oanda", action="store_true", help="skip OANDA REST stream")
 
+    pl = sub.add_parser("live", help="run live telegram signal pipeline (one-shot)")
+    pl.add_argument("--once", action="store_true", help="fire one D1 bar-close cycle and exit")
+    pl.add_argument("--ping", action="store_true", help="send connectivity-test telegram message")
+    pl.add_argument("--status", action="store_true", help="print current paper state as JSON")
+    pl.add_argument("--dry-run", action="store_true", help="no Telegram send, no state mutation")
+    pl.add_argument("--no-refresh", action="store_true", help="skip the master_v16 refresh step")
+    pl.add_argument("--quiet", action="store_true", help="minimal stdout output")
+
     args = p.parse_args(argv)
     _setup_logging(args.verbose)
 
@@ -145,6 +166,20 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_status(args)
     if args.cmd == "stream":
         return cmd_stream(args)
+    if args.cmd == "live":
+        # Pass through the relevant flags as if they were sys.argv to runner.main()
+        live_args = []
+        for flag, attr in [
+            ("--once", "once"),
+            ("--ping", "ping"),
+            ("--status", "status"),
+            ("--dry-run", "dry_run"),
+            ("--no-refresh", "no_refresh"),
+            ("--quiet", "quiet"),
+        ]:
+            if getattr(args, attr, False):
+                live_args.append(flag)
+        return cmd_live(argparse.Namespace(_remaining=live_args))
     return 2
 
 

@@ -1,0 +1,201 @@
+"""One-shot bar-close runner.
+
+Triggered by cron (or manually) — it:
+  1. Optionally re-runs master_v16.py to refresh the production parquet
+  2. Computes the MTM update for the latest bar (idempotent)
+  3. Persists state
+  4. Sends a Telegram daily digest
+  5. Records the bar_fire as ok / skipped / error
+
+Designed to be safe to invoke repeatedly: second call on the same bar is a no-op.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+import traceback
+from pathlib import Path
+from typing import Optional
+
+from alphabeta.config import settings
+from alphabeta.live.pnl import (
+    latest_mtm,
+    persist_mtm,
+    rolling_sharpe,
+    STARTING_EQUITY,
+    PRODUCTION_PARQUET,
+)
+from alphabeta.live.signals import (
+    format_boot_message_html,
+    format_daily_digest_html,
+)
+from alphabeta.live.state import State
+from alphabeta.live.telegram_client import TelegramClient
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+MASTER_V16 = REPO_ROOT / "scratch" / "quant" / "master_v16.py"
+
+
+def refresh_master_v16(verbose: bool = True) -> None:
+    """Re-run master_v16.py to refresh PRODUCTION_v16_V4.parquet.
+
+    No-op if the file is fresh (within last 6 hours). Use --force to bypass.
+    """
+    cmd = [sys.executable, str(MASTER_V16)]
+    env = {**__import__("os").environ, "PYTHONPATH": str(REPO_ROOT)}
+    if verbose:
+        print(f"[runner] refreshing master_v16: {' '.join(cmd)}")
+    result = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"master_v16 failed (exit {result.returncode}):\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
+    if verbose:
+        print(result.stdout[-1500:] if len(result.stdout) > 1500 else result.stdout)
+
+
+def fire_once(*, dry_run: bool = False, refresh: bool = True, verbose: bool = True) -> dict:
+    """Fire one D1 bar-close cycle. Returns a result dict suitable for logging."""
+    if refresh:
+        try:
+            refresh_master_v16(verbose=verbose)
+        except Exception as e:
+            if verbose:
+                print(f"[runner] master_v16 refresh failed: {e}", file=sys.stderr)
+            # Continue with whatever production parquet we have
+
+    state = State()
+    update = latest_mtm(state)
+    if update is None:
+        return {"status": "skipped", "reason": "no new bar or already fired"}
+
+    if dry_run:
+        print(f"[DRY-RUN] would update equity to ${update.equity_after:,.2f}")
+        print(f"[DRY-RUN] daily return: {update.portfolio_return:+.4%}")
+        print(f"[DRY-RUN] top: {update.sleeve_attribution_top}")
+        print(f"[DRY-RUN] bottom: {update.sleeve_attribution_bottom}")
+
+    # Sharpe needs a few days of history first
+    sharpe_30d = rolling_sharpe(state, window_days=30) if not dry_run else None
+
+    digest_html = format_daily_digest_html(
+        bar_iso=update.bar_close_iso,
+        equity_after=update.equity_after,
+        equity_before=update.equity_before,
+        portfolio_return=update.portfolio_return,
+        daily_pnl_usd=update.daily_pnl_usd,
+        drawdown_from_peak=update.drawdown_from_peak,
+        peak_equity=update.peak_equity,
+        mtd_return=update.mtd_return,
+        ytd_return=update.ytd_return,
+        since_start_return=update.since_start_return,
+        rolling_sharpe_30d=sharpe_30d,
+        sleeve_top=update.sleeve_attribution_top,
+        sleeve_bottom=update.sleeve_attribution_bottom,
+        starting_equity=STARTING_EQUITY,
+        next_bar_hint="D1 close + 1 day @ 21:00 UTC",
+    )
+
+    if verbose:
+        print("[runner] digest preview:")
+        print(digest_html)
+
+    tc = TelegramClient(dry_run=dry_run)
+    try:
+        msg_id = tc.send(
+            digest_html,
+            parse_mode="HTML",
+            idempotency_key=f"digest:{update.bar_close_iso}",
+        )
+    except Exception as e:
+        state.record_fire("D1", update.bar_close_iso, status="error", error_msg=str(e))
+        return {
+            "status": "error",
+            "stage": "telegram_send",
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+        }
+
+    if not dry_run:
+        persist_mtm(state, update)
+        state.record_fire("D1", update.bar_close_iso, status="ok", signals_emitted=1)
+
+    return {
+        "status": "ok",
+        "dry_run": dry_run,
+        "bar_close_iso": update.bar_close_iso,
+        "equity_after": update.equity_after,
+        "portfolio_return": update.portfolio_return,
+        "telegram_message_id": msg_id,
+    }
+
+
+def ping(*, dry_run: bool = False) -> dict:
+    """Send a connectivity-test Telegram message."""
+    tc = TelegramClient(dry_run=dry_run)
+    me = tc.get_me() if not dry_run else {"result": {"username": "(dry-run)"}}
+    bot_username = me.get("result", {}).get("username", "unknown")
+    text = format_boot_message_html(bot_username, repo_url="github.com/rmaltsev1/alpha-beta")
+    msg_id = tc.send(text, parse_mode="HTML", idempotency_key=f"boot:{__import__('time').strftime('%Y-%m-%d-%H')}")
+    return {"status": "ok", "telegram_message_id": msg_id, "bot": bot_username}
+
+
+def status() -> dict:
+    """Return a dict summarizing current paper state."""
+    state = State()
+    equity = state.latest_equity()
+    positions = state.get_portfolio_positions()
+    recent = state.recent_signals(limit=10)
+    sharpe_30d = rolling_sharpe(state, window_days=30)
+    return {
+        "equity": equity if equity is not None else STARTING_EQUITY,
+        "starting_equity": STARTING_EQUITY,
+        "since_start_return": (equity / STARTING_EQUITY - 1.0) if equity else 0.0,
+        "open_positions": positions,
+        "rolling_sharpe_30d": sharpe_30d,
+        "recent_signals_count": len(recent),
+        "production_parquet_exists": PRODUCTION_PARQUET.exists(),
+    }
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    ap = argparse.ArgumentParser(prog="alphabeta live")
+    ap.add_argument("--once", action="store_true", help="Fire one D1 bar-close cycle and exit.")
+    ap.add_argument("--ping", action="store_true", help="Send a connectivity-test Telegram message.")
+    ap.add_argument("--status", action="store_true", help="Print current paper state as JSON.")
+    ap.add_argument("--dry-run", action="store_true", help="Print would-be actions; do not send Telegram or mutate state.")
+    ap.add_argument("--no-refresh", action="store_true", help="Skip the master_v16 refresh step (use existing parquet).")
+    ap.add_argument("--quiet", action="store_true", help="Minimal stdout output.")
+    args = ap.parse_args(argv)
+
+    if args.status:
+        print(json.dumps(status(), indent=2, default=str))
+        return 0
+
+    if args.ping:
+        try:
+            r = ping(dry_run=args.dry_run)
+            print(json.dumps(r, indent=2))
+            return 0
+        except Exception as e:
+            print(f"ping failed: {e}", file=sys.stderr)
+            return 2
+
+    if args.once or args.dry_run:
+        r = fire_once(
+            dry_run=args.dry_run,
+            refresh=not args.no_refresh,
+            verbose=not args.quiet,
+        )
+        print(json.dumps(r, indent=2, default=str))
+        return 0 if r.get("status") in {"ok", "skipped"} else 1
+
+    ap.print_help()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

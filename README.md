@@ -108,6 +108,22 @@ Data is downloaded once from the rektfree production postgres (where the dataset
 
 See the capacity-aware sleeve list in [`scratch/quant/INDEX.md`](scratch/quant/INDEX.md).
 
+## Live paper-trading via Telegram
+
+The portfolio can publish its daily P&L and (in v2) per-instrument position changes as Telegram messages, so you can paper-track it without running a broker integration.
+
+```sh
+# One-time bot setup: open Telegram, message @alphabetabotnotrobot once
+python -m alphabeta live --ping        # connectivity smoke test
+python -m alphabeta live --dry-run     # preview today's digest in stdout
+python -m alphabeta live --once        # fire today's digest to Telegram
+
+# Install the daily scheduler (fires every 21:05 UTC)
+./scripts/install_live_plist.sh
+```
+
+The digest contains: equity since paper-start, daily P&L, MTD/YTD, drawdown, rolling Sharpe, and the top contributing / dragging sleeves of the day. Full design and v2 roadmap in [LIVE_SIGNALS.md](LIVE_SIGNALS.md).
+
 ## How the development worked
 
 ~25 hours total across 11 research waves. Each wave spawned 3–10 parallel research agents (Claude Code sub-agents) testing specific hypotheses:
