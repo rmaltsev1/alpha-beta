@@ -84,6 +84,14 @@ CREATE TABLE IF NOT EXISTS bar_fires (
     error_msg TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_fires_tf ON bar_fires(timeframe, bar_close_iso);
+
+CREATE TABLE IF NOT EXISTS exposure_snapshots (
+    bar_close_iso TEXT PRIMARY KEY,
+    window_days INTEGER NOT NULL,
+    r_squared REAL NOT NULL,
+    betas_json TEXT NOT NULL,
+    created_ts REAL NOT NULL
+);
 """
 
 
@@ -250,6 +258,46 @@ class State:
                 (self.fire_key(timeframe, bar_close_iso),),
             ).fetchone()
         return row is not None
+
+    def record_exposure(
+        self,
+        bar_close_iso: str,
+        window_days: int,
+        r_squared: float,
+        betas: dict[str, float],
+    ) -> None:
+        with self._conn() as c:
+            c.execute(
+                "INSERT INTO exposure_snapshots "
+                "(bar_close_iso, window_days, r_squared, betas_json, created_ts) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(bar_close_iso) DO UPDATE SET "
+                "window_days=excluded.window_days, r_squared=excluded.r_squared, "
+                "betas_json=excluded.betas_json",
+                (bar_close_iso, window_days, r_squared, json.dumps(betas), time.time()),
+            )
+
+    def latest_exposure_betas(self) -> Optional[dict[str, float]]:
+        """Get most recent betas (excluding the bar at `before_iso` if given)."""
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT betas_json FROM exposure_snapshots "
+                "ORDER BY bar_close_iso DESC LIMIT 1"
+            ).fetchone()
+        if not row:
+            return None
+        return json.loads(row["betas_json"])
+
+    def exposure_before(self, bar_iso: str) -> Optional[dict[str, float]]:
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT betas_json FROM exposure_snapshots "
+                "WHERE bar_close_iso < ? ORDER BY bar_close_iso DESC LIMIT 1",
+                (bar_iso,),
+            ).fetchone()
+        if not row:
+            return None
+        return json.loads(row["betas_json"])
 
     def record_fire(
         self,

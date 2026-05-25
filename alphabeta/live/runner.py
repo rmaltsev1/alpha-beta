@@ -20,6 +20,13 @@ from pathlib import Path
 from typing import Optional
 
 from alphabeta.config import settings
+from alphabeta.live.exposure import (
+    WINDOW_DAYS,
+    compute_exposure,
+    detect_signal_events,
+    format_exposure_html,
+    format_signal_events_html,
+)
 from alphabeta.live.pnl import (
     latest_mtm,
     persist_mtm,
@@ -103,13 +110,48 @@ def fire_once(*, dry_run: bool = False, refresh: bool = True, verbose: bool = Tr
         print("[runner] digest preview:")
         print(digest_html)
 
+    # v2: compute per-instrument exposure via rolling regression
+    prev_betas = state.exposure_before(update.bar_close_iso)
+    exposure_snap = None
+    signal_events = []
+    try:
+        exposure_snap = compute_exposure(
+            window_days=WINDOW_DAYS, last_known=prev_betas
+        )
+        signal_events = detect_signal_events(exposure_snap)
+    except Exception as e:
+        if verbose:
+            print(f"[runner] exposure computation failed: {e}", file=sys.stderr)
+
     tc = TelegramClient(dry_run=dry_run)
     try:
+        # 1) main daily digest (P&L)
         msg_id = tc.send(
             digest_html,
             parse_mode="HTML",
             idempotency_key=f"digest:{update.bar_close_iso}",
         )
+        # 2) exposure snapshot (per-instrument net beta)
+        if exposure_snap is not None:
+            exposure_html = format_exposure_html(exposure_snap)
+            tc.send(
+                exposure_html,
+                parse_mode="HTML",
+                idempotency_key=f"exposure:{exposure_snap.bar_iso}",
+            )
+            if verbose:
+                print("[runner] exposure preview:")
+                print(exposure_html)
+        # 3) material exposure-change events (signal feed)
+        if signal_events:
+            events_html = format_signal_events_html(exposure_snap, signal_events)
+            tc.send(
+                events_html,
+                parse_mode="HTML",
+                idempotency_key=f"events:{exposure_snap.bar_iso}",
+            )
+            if verbose:
+                print(f"[runner] {len(signal_events)} signal event(s) emitted")
     except Exception as e:
         state.record_fire("D1", update.bar_close_iso, status="error", error_msg=str(e))
         return {
@@ -121,7 +163,15 @@ def fire_once(*, dry_run: bool = False, refresh: bool = True, verbose: bool = Tr
 
     if not dry_run:
         persist_mtm(state, update)
-        state.record_fire("D1", update.bar_close_iso, status="ok", signals_emitted=1)
+        if exposure_snap is not None:
+            state.record_exposure(
+                exposure_snap.bar_iso,
+                exposure_snap.window_days,
+                exposure_snap.r_squared,
+                exposure_snap.betas,
+            )
+        state.record_fire("D1", update.bar_close_iso, status="ok",
+                          signals_emitted=1 + (1 if exposure_snap else 0) + len(signal_events))
 
     return {
         "status": "ok",
@@ -130,6 +180,8 @@ def fire_once(*, dry_run: bool = False, refresh: bool = True, verbose: bool = Tr
         "equity_after": update.equity_after,
         "portfolio_return": update.portfolio_return,
         "telegram_message_id": msg_id,
+        "exposure_r2": exposure_snap.r_squared if exposure_snap else None,
+        "signal_events_count": len(signal_events),
     }
 
 

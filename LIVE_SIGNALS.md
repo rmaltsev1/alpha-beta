@@ -2,13 +2,15 @@
 
 How the backtested `master_v16` portfolio is exposed as paper-trading Telegram signals.
 
-## What the system delivers
+## What v2 delivers (current)
 
-Three flows out of Telegram, all targeting one chat:
+Three messages per bar-close fire, all to your Telegram chat:
 
-1. **Per-bar signal messages** at each bar close — only when *net portfolio position per instrument* changes materially (|Δ| ≥ 0.05 of book). One batched message per bar, not one per instrument.
-2. **Daily digest** at 21:00 UTC — current positions table, today's P&L, MTD/YTD, drawdown, top-contributing sleeves.
-3. **Ops alerts** for failures (data fetch, scheduler, computation) — terse, terminal-style.
+1. **Daily P&L digest** — equity, day P&L, MTD/YTD, drawdown, 30d Sharpe, top contributing / dragging sleeves.
+2. **Net portfolio exposure snapshot** — implied long/short exposure per instrument via rolling 60d regression of portfolio returns on instrument returns.
+3. **Material exposure-shift events** — only when |Δbeta| ≥ 0.05 from the prior snapshot, batched into one message.
+
+The exposure estimator is a Sharpe-style factor decomposition: `portfolio_ret = Σ βᵢ · instrument_retᵢ + ε`. Ridge-regularized for stability. **It's an estimate, not the exact position vector** — but it's directionally correct and updates daily. R² is reported in every message so you can see how trustworthy the betas are (currently ~0.30, meaning ~30% of portfolio variance is explained by linear instrument exposures; the rest comes from regime gates, vol-target rebalancing, and other non-linear effects).
 
 ## Architectural constraint discovered in the sleeve audit
 
@@ -46,15 +48,19 @@ What's not in v1:
 - 4H / W1 intraday fires (D1 only for v1)
 - ATR-based stop-loss hints
 
-## v2 roadmap
+## v2 status (shipped)
 
-Once v1 is shipping clean digests:
+- ✅ Per-instrument exposure estimates via rolling regression (not per-sleeve positions, but reaches the same paper-trading goal at much lower complexity).
+- ✅ Per-bar event messages when |Δbeta| ≥ 0.05.
+- ❌ Per-sleeve position emission (alternative path, would require refactoring all 24 sleeves).
 
-1. **Position emission**: modify each sleeve to optionally write a positions parquet alongside its returns parquet. Aggregate to net portfolio position per instrument.
-2. **Per-bar event messages**: when net position per instrument changes ≥0.05 of book, fire a batched Telegram event.
-3. **Multi-timeframe**: add H4 + W1 fires.
-4. **Daemon**: long-running `python -m alphabeta live --daemon` with APScheduler + stream-driven fast path + launchd plist for auto-start.
-5. **Reconciliation**: detect missed fires (Mac sleep) and catch up on startup with `[STALE RESUME]` marker.
+## v3 roadmap
+
+1. **Higher R²**: add squared returns, lagged returns, and cross-asset interaction terms as regressors to capture vol-target and regime-gate non-linearities. Target R² > 0.6.
+2. **Multi-timeframe**: H4 + W1 fires.
+3. **Daemon**: long-running `python -m alphabeta live --daemon` with APScheduler + stream-driven fast path.
+4. **Reconciliation**: detect missed fires (Mac sleep) and catch up on startup with `[STALE RESUME]` marker.
+5. **Per-sleeve positions** (still possible later): modify each sleeve to write a `positions.parquet`. Would replace the regression-based estimate with exact betas (R² = 1.0 by construction).
 
 ## Data flow (v1)
 
