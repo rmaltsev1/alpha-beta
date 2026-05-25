@@ -35,8 +35,12 @@ RunAtLoad fires once on machine boot/login — useful for catch-up.
         <integer>5</integer>
     </dict>
 
+    <!-- RunAtLoad=true makes launchd fire once on login (and on plist reload).
+         Combined with the idempotent --once dedup on bar_close_iso, this gives
+         catch-up: if your Mac was asleep at 21:05 UTC, the missed day fires on
+         next login. Won't double-fire because the dedup detects the same bar. -->
     <key>RunAtLoad</key>
-    <false/>
+    <true/>
 
     <key>StandardOutPath</key>
     <string>ABS_HOME/Library/Logs/alphabeta_live.out</string>
