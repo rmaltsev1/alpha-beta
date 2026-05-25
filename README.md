@@ -7,19 +7,20 @@ This repo contains the data infrastructure, the per-strategy implementations, th
 
 ## Performance headline
 
-Production v15, equal-weight 23-sleeve panel, 18 % vol target, validated walk-forward:
+Production **v16**, equal-weight 24-sleeve panel, dynamic 25% vol target with 30%-vol ceiling, validated walk-forward:
 
 | Metric | Out-of-sample (2024-01 → 2026-05) |
 |---|---|
-| Sharpe ratio | **+4.13** |
-| Annualized return | **+67.5 %** |
-| Annualized volatility | 16.3 % |
-| Max drawdown | **−6.0 %** |
-| Average monthly return | **+5.6 %** |
-| Worst calendar year | 2023 at **+4.0 %/mo** |
-| 2022 crisis year | **+5.05 %/mo at −6.2 % DD** |
+| Sharpe ratio | **+4.30** |
+| Annualized return | **+85.3 %** |
+| Annualized volatility | 19.8 % |
+| Max drawdown | **−7.0 %** |
+| Average monthly return | **+7.04 %** |
+| Worst OOS month | **+0.34 %** (every OOS month positive!) |
+| 2022 crisis year | **+6.15 %/mo at −5.6 % DD** |
 | Bootstrap P(losing year) | **0.0 %** (1000 trials) |
-| Bootstrap P(Sharpe > 3) | 96.7 % |
+
+For the more conservative profile, v15 production (+5.6%/mo at -6% DD) is also available.
 
 For the full performance breakdown including leverage scenarios and capacity analysis, see [`scratch/quant/FINAL_REPORT_v15.md`](scratch/quant/FINAL_REPORT_v15.md).
 
