@@ -36,22 +36,32 @@ echo "[$TS] alphabeta live fire starting"
 echo "Repo: $REPO_ROOT"
 echo "Python: $(which python)"
 
-# Step 1: incremental fetch of fresh candles from Binance + OANDA APIs.
-# Uses --source api so no SSH tunnel is required. Incremental (only new bars
-# since last fetch), so typically ~30s-2min depending on how stale we are.
-# If fetch fails (network), continue anyway with whatever's on disk.
-echo "[$(date -u +%H:%M:%S)] fetching latest candles via API..."
-if ! python -m alphabeta fetch --source api; then
-    echo "[$(date -u +%H:%M:%S)] WARNING: fetch failed, proceeding with stale data" >&2
+# Step 1: full pipeline rebuild — fetches candles, re-runs all 50 sleeve scripts,
+# then runs the master chain v3 → v16. ~5-7 min total. This is what makes the
+# signals truly reflect today's data instead of replaying frozen historicals.
+# Use --skip-rebuild as an arg to bypass (e.g. for fast testing).
+SKIP_REBUILD=0
+NEW_ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        --skip-rebuild) SKIP_REBUILD=1 ;;
+        *) NEW_ARGS+=("$arg") ;;
+    esac
+done
+
+if [[ $SKIP_REBUILD -eq 0 ]]; then
+    echo "[$(date -u +%H:%M:%S)] running full pipeline rebuild (~5-7 min)..."
+    if ! "$SCRIPT_DIR/rebuild_all.sh"; then
+        echo "[$(date -u +%H:%M:%S)] WARNING: rebuild had failures, continuing" >&2
+    fi
+else
+    echo "[$(date -u +%H:%M:%S)] --skip-rebuild: using existing parquets"
 fi
 
-# Step 2: run the live signal pipeline. The --once command refreshes the
-# master_v16 integration script (which reads pre-computed sleeve returns).
-# NOTE: individual sleeve scripts are NOT re-run by --once. The sleeve panel
-# `all_sleeve_returns_v15.parquet` is frozen until you manually rebuild it.
-# For day-over-day signal freshness, run rebuild_sleeves.sh weekly.
-echo "[$(date -u +%H:%M:%S)] running live --once..."
-python -m alphabeta live --once "$@"
+# Step 2: run the signal pipeline. --no-refresh because rebuild_all already
+# ran master_v16; --once means just process the latest bar and exit.
+echo "[$(date -u +%H:%M:%S)] running live --once --no-refresh..."
+python -m alphabeta live --once --no-refresh "${NEW_ARGS[@]}"
 EXIT_CODE=$?
 
 TS_END="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

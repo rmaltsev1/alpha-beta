@@ -130,6 +130,27 @@ python -m alphabeta live --ping
 python -m alphabeta live --once --no-refresh
 ```
 
+## Pipeline freshness (important)
+
+A daily fire runs the **full rebuild chain**, not just the master integration script:
+
+```
+21:05 UTC daily:
+  1. alphabeta fetch --source api       ← refresh raw candles from Binance/OANDA
+  2. Run 50 individual sleeve scripts   ← compute fresh per-sleeve positions
+  3. Run master chain v3 → v16          ← assemble integrated portfolio
+  4. Run live --once --no-refresh       ← emit Telegram signals from fresh data
+```
+
+Total ~5-7 minutes per fire. This is what makes signals truly reflect today's data instead of replaying frozen historicals.
+
+Manual full rebuild any time:
+```sh
+./scripts/rebuild_all.sh                 # fetch + sleeves + master chain
+./scripts/rebuild_all.sh --no-fetch      # skip fetch (use what's on disk)
+./scripts/rebuild_all.sh --skip-sleeves  # only re-run master chain
+```
+
 ## Deployment on macOS
 
 Two paths, pick one.

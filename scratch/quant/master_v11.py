@@ -188,11 +188,18 @@ def main():
         dd = (eq_y/eq_y.cummax()-1).min()
         print(f"  {year}  Sh={sh:+.2f}  Ret={ar:+.1%}  Vol={av:.1%}  DD={dd:+.1%}  Mo={ar/12:+.2%}")
 
-    # ---- Test Kelly blend ----
+    # ---- Test Kelly blend (diagnostic only — panel already saved above) ----
     print(f"\n=== Kelly-blend (25% Kelly + 75% equal-weight) ===")
     kelly_path = WAVE3 / "kelly_returns.parquet"
     if kelly_path.exists():
         kr = pd.read_parquet(kelly_path)
+        # Schema-tolerant: kelly_sizing.py was later updated to save with DatetimeIndex
+        # and multiple return columns, breaking the original `kr["timestamp"]` / `kr["ret"]`.
+        # Skip the diagnostic if the schema doesn't match the original expectation.
+        if "timestamp" not in kr.columns or "ret" not in kr.columns:
+            print(f"  (skip: kelly_returns.parquet schema changed; "
+                  f"columns={list(kr.columns)[:5]}...)")
+            return
         kr_ts = pd.to_datetime(kr["timestamp"], utc=True)
         kelly = pd.Series(kr["ret"].values, index=kr_ts)
         kelly = normalize_idx(kelly.rename("KELLY"))
