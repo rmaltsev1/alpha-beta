@@ -20,10 +20,13 @@ RunAtLoad fires once on machine boot/login — useful for catch-up.
     <key>Label</key>
     <string>com.alphabeta.live</string>
 
+    <!-- IMPORTANT: do NOT use `bash -c "<path>"` — if the repo path contains a
+         space (e.g. "Python Projects"), bash -c interprets the space as an
+         argument separator and the script is never found. Pass the script as
+         a direct argument to bash instead. -->
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>-c</string>
         <string>ABS_REPO_PATH/scripts/run_live_daily.sh</string>
     </array>
 
